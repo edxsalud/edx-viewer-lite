@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EDX DICOM Viewer</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Cornerstone Libraries from CDN -->
+    <script src="https://unpkg.com/cornerstone-core@2.6.1/dist/cornerstone.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-math@0.1.10/dist/cornerstoneMath.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-tools@6.0.10/dist/cornerstoneTools.min.js"></script>
+    <script src="https://unpkg.com/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+    <script
+        src="https://unpkg.com/cornerstone-wado-image-loader@4.13.2/dist/cornerstoneWADOImageLoader.bundle.min.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Left Panel: Studies List -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <img src="logo-edx-white.png" alt="EDX Logo" class="app-logo">
+                <span class="app-version">v1.0.0</span>
+            </div>
+            <div class="sidebar-header">
+                <h1><i class="fas fa-notes-medical"></i> Estudios</h1>
+            </div>
+
+            <!-- File Upload Controls -->
+            <div class="upload-controls">
+                <button id="btn-load-folder" class="upload-btn">
+                    <i class="fas fa-folder-open"></i> Cargar Carpeta DICOM
+                </button>
+                <input type="file" id="folder-input" webkitdirectory directory multiple style="display: none;">
+            </div>
+
+            <div id="studies-list" class="studies-list">
+                <div class="no-studies-message">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Carga archivos DICOM para comenzar</p>
+                </div>
+            </div>
+            <div class="disclaimer">
+                <i class="fas fa-exclamation-triangle"></i>
+                Solo para uso académico e investigación. No apto para diagnóstico médico.
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Toolbar -->
+            <div class="toolbar">
+                <div class="tool-group">
+                    <button id="tool-pan" class="tool-btn" title="Mover (Pan)">
+                        <i class="fas fa-arrows-alt"></i> Mover
+                    </button>
+                    <button id="tool-zoom" class="tool-btn" title="Zoom">
+                        <i class="fas fa-search-plus"></i> Zoom
+                    </button>
+                    <button id="tool-wwwc" class="tool-btn active" title="Brillo/Contraste">
+                        <i class="fas fa-adjust"></i> W/L
+                    </button>
+                    <button id="tool-length" class="tool-btn" title="Medir distancia">
+                        <i class="fas fa-ruler"></i> Medir
+                    </button>
+                    <button id="tool-reset" class="tool-btn" title="Resetear vista">
+                        <i class="fas fa-undo"></i> Reset
+                    </button>
+                </div>
+                <div class="image-nav">
+                    <button id="prev-image" class="nav-btn" disabled><i class="fas fa-chevron-left"></i>
+                        Anterior</button>
+                    <span id="image-counter">0 / 0</span>
+                    <button id="next-image" class="nav-btn" disabled>Siguiente <i
+                            class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+
+            <!-- Viewer with Instructions -->
+            <div class="viewer-container">
+                <div id="dicom-viewport" class="viewport">
+                    <div id="instructions-zone" class="instructions-zone">
+                        <h2><i class="fas fa-info-circle"></i> Cómo usar el visor</h2>
+                        <div class="instruction-steps">
+                            <div class="step">
+                                <span class="step-number">1</span>
+                                <p>Haz clic en <strong>"Cargar Carpeta DICOM"</strong> en el panel izquierdo</p>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">2</span>
+                                <p>Selecciona la carpeta que contiene tus archivos DICOM</p>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">3</span>
+                                <p>En el panel <strong>"Estudios"</strong> aparecerán los estudios encontrados</p>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">4</span>
+                                <p>Haz clic en una serie para visualizar las imágenes</p>
+                            </div>
+                        </div>
+                        <div class="tools-hint">
+                            <p><i class="fas fa-mouse"></i> Usa las herramientas <strong>Mover</strong>,
+                                <strong>Zoom</strong> y <strong>W/L</strong> arrastrando sobre la imagen
+                            </p>
+                            <p><i class="fas fa-scroll"></i> Navega entre imágenes con la rueda del ratón</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel: Patient Info -->
+        <aside class="info-panel">
+            <div class="panel-header">
+                <h2><i class="fas fa-user"></i> Paciente</h2>
+            </div>
+            <div id="patient-info" class="patient-info">
+                <div class="info-placeholder">
+                    <p>Sin datos</p>
+                </div>
+            </div>
+
+            <div class="panel-header">
+                <h2><i class="fas fa-clipboard-list"></i> Estudio</h2>
+            </div>
+            <div id="study-info" class="study-info">
+                <div class="info-placeholder">
+                    <p>Sin datos</p>
+                </div>
+            </div>
+
+            <div class="panel-header">
+                <h2><i class="fas fa-image"></i> Imagen</h2>
+            </div>
+            <div id="image-info" class="image-info">
+                <div class="info-placeholder">
+                    <p>Sin datos</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

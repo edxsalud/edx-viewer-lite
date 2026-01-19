@@ -1,0 +1,959 @@
+// Initialize Cornerstone and WADO Image Loader
+cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+
+// Configure WADO Image Loader for local files
+cornerstoneWADOImageLoader.configure({
+    useWebWorkers: false,
+    decodeConfig: {
+        usePDFJS: false
+    }
+});
+
+// Main application
+class DicomViewer {
+    constructor() {
+        this.studies = [];
+        this.currentSeries = null;
+        this.currentImageIndex = 0;
+        this.element = null;
+        this.activeTool = 'wwwc';
+        this.imageIds = [];
+        this.fileMap = new Map(); // Maps imageId to File object
+        this.measurements = []; // Store measurement data
+        this.isDrawingMeasurement = false;
+        this.measurementStart = null;
+
+        this.init();
+    }
+
+    init() {
+        this.setupEventListeners();
+        this.setupDropZone();
+    }
+
+    setupViewport() {
+        const container = document.getElementById('dicom-viewport');
+
+        // Hide instructions zone
+        const instructionsZone = document.getElementById('instructions-zone');
+        if (instructionsZone) instructionsZone.classList.add('hidden');
+
+        // Remove old element if exists
+        if (this.element) {
+            try {
+                cornerstone.disable(this.element);
+            } catch (e) { }
+        }
+
+        // Create fresh element for Cornerstone
+        container.innerHTML = '<div id="cornerstone-element" style="width: 100%; height: 100%;"></div>';
+        this.element = document.getElementById('cornerstone-element');
+
+        // Enable Cornerstone on the new element
+        cornerstone.enable(this.element);
+        this.viewportInitialized = true;
+
+        // Re-setup mouse events on new element
+        this.setupViewportEvents();
+    }
+
+    setupDropZone() {
+        const dropZone = document.getElementById('drop-zone');
+        const viewport = document.getElementById('dicom-viewport');
+
+        // Prevent default drag behaviors on the whole document
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            document.body.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+
+        // Drag and drop events on viewport
+        ['dragenter', 'dragover'].forEach(eventName => {
+            viewport.addEventListener(eventName, () => {
+                if (dropZone) dropZone.classList.add('drag-over');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            viewport.addEventListener(eventName, () => {
+                if (dropZone) dropZone.classList.remove('drag-over');
+            });
+        });
+
+        viewport.addEventListener('drop', async (e) => {
+            console.log('Drop event fired');
+
+            // Try to get files from dataTransfer.items first (for folder support)
+            if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+                const items = e.dataTransfer.items;
+                const hasWebkitEntry = items[0] && items[0].webkitGetAsEntry;
+
+                if (hasWebkitEntry) {
+                    await this.handleDroppedItems(items);
+                    return;
+                }
+            }
+
+            // Fallback: use dataTransfer.files directly
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                console.log('Using files fallback:', e.dataTransfer.files.length, 'files');
+                this.handleFiles(Array.from(e.dataTransfer.files));
+            }
+        });
+
+        // Folder button
+        document.getElementById('btn-load-folder').addEventListener('click', () => {
+            document.getElementById('folder-input').click();
+        });
+
+        // Folder input
+        document.getElementById('folder-input').addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                this.handleFiles(Array.from(e.target.files));
+            }
+        });
+    }
+
+    async handleDroppedItems(items) {
+        console.log('handleDroppedItems called with', items.length, 'items');
+        const files = [];
+
+        // Helper to read ALL entries from a directory (readEntries returns max 100 at a time)
+        const readAllDirectoryEntries = async (dirReader) => {
+            const entries = [];
+            let batch = await new Promise((resolve, reject) => {
+                dirReader.readEntries(resolve, reject);
+            });
+
+            while (batch.length > 0) {
+                entries.push(...batch);
+                batch = await new Promise((resolve, reject) => {
+                    dirReader.readEntries(resolve, reject);
+                });
+            }
+            return entries;
+        };
+
+        const traverseFileTree = async (entry, path = '') => {
+            if (entry.isFile) {
+                try {
+                    const file = await new Promise((resolve, reject) => {
+                        entry.file(resolve, reject);
+                    });
+                    // Preserve relative path for organization
+                    Object.defineProperty(file, 'relativePath', {
+                        value: path + file.name,
+                        writable: false
+                    });
+                    files.push(file);
+                } catch (err) {
+                    console.warn('Error reading file:', entry.name, err);
+                }
+            } else if (entry.isDirectory) {
+                try {
+                    const dirReader = entry.createReader();
+                    const entries = await readAllDirectoryEntries(dirReader);
+                    console.log(`Directory "${entry.name}" has ${entries.length} entries`);
+
+                    for (const childEntry of entries) {
+                        await traverseFileTree(childEntry, path + entry.name + '/');
+                    }
+                } catch (err) {
+                    console.warn('Error reading directory:', entry.name, err);
+                }
+            }
+        };
+
+        // Process all dropped items
+        for (let i = 0; i < items.length; i++) {
+            const entry = items[i].webkitGetAsEntry();
+            if (entry) {
+                console.log('Processing entry:', entry.name, 'isDirectory:', entry.isDirectory);
+                await traverseFileTree(entry);
+            }
+        }
+
+        console.log('Total files collected:', files.length);
+
+        if (files.length > 0) {
+            this.handleFiles(files);
+        } else {
+            alert('No se encontraron archivos en la carpeta');
+        }
+    }
+
+    async handleFiles(files) {
+        // Filter DICOM files
+        const dicomFiles = files.filter(file => {
+            const name = file.name.toLowerCase();
+            return name.endsWith('.dcm') || !name.includes('.');
+        });
+
+        if (dicomFiles.length === 0) {
+            alert('No se encontraron archivos DICOM válidos');
+            return;
+        }
+
+        // Parse and organize files
+        await this.parseAndOrganizeFiles(dicomFiles);
+        this.renderStudiesList();
+
+        // Automatically open the first series of the first study
+        if (this.studies.length > 0) {
+            const firstStudy = this.studies[0];
+            const seriesIds = Object.keys(firstStudy.series);
+            if (seriesIds.length > 0) {
+                const firstSeriesId = seriesIds[0];
+
+                // Expand the series list dropdown
+                const seriesList = document.getElementById('series-0');
+                if (seriesList) {
+                    seriesList.classList.add('expanded');
+                }
+
+                // Mark the first series as active in the UI
+                const firstSeriesElement = document.querySelector(`#series-0 .series-item`);
+                if (firstSeriesElement) {
+                    firstSeriesElement.classList.add('active');
+                }
+
+                // Load the first series
+                await this.selectSeriesDirectly(0, firstSeriesId);
+            }
+        }
+    }
+
+    // Helper method to select series without relying on event.target
+    async selectSeriesDirectly(studyIdx, seriesId) {
+        const study = this.studies[studyIdx];
+        const series = study.series[seriesId];
+
+        this.currentSeries = series;
+        this.currentImageIndex = 0;
+
+        // Check if this is a Structured Report series
+        if (series.modality === 'SR') {
+            this.viewportInitialized = false;
+            await this.loadStructuredReport(series);
+            return;
+        }
+
+        // Initialize viewport
+        this.setupViewport();
+
+        // Create image IDs array
+        this.imageIds = series.images.map(img => img.imageId);
+        this.invalidImageIndices = new Set();
+
+        // Load first valid image
+        await this.loadFirstValidImage();
+        this.updateNavigation();
+    }
+
+    async parseAndOrganizeFiles(files) {
+        this.studies = [];
+        const studiesMap = {};
+
+        for (const file of files) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+
+                // Extract metadata
+                const studyUID = dataSet.string('x0020000d') || 'UnknownStudy';
+                const seriesUID = dataSet.string('x0020000e') || 'UnknownSeries';
+                const studyDescription = dataSet.string('x00081030') || 'Estudio';
+                const seriesDescription = dataSet.string('x0008103e') || '';
+                const modality = dataSet.string('x00080060') || 'OT';
+                const instanceNumber = parseInt(dataSet.string('x00200013')) || 0;
+
+                // Create study if not exists
+                if (!studiesMap[studyUID]) {
+                    studiesMap[studyUID] = {
+                        id: studyUID,
+                        description: studyDescription,
+                        modality: modality,
+                        series: {}
+                    };
+                }
+
+                // Create series if not exists
+                if (!studiesMap[studyUID].series[seriesUID]) {
+                    studiesMap[studyUID].series[seriesUID] = {
+                        id: seriesUID,
+                        description: seriesDescription,
+                        modality: modality,
+                        images: []
+                    };
+                }
+
+                // Register file with Cornerstone
+                const imageId = cornerstoneWADOImageLoader.wadouri.fileManager.add(file);
+                this.fileMap.set(imageId, file);
+
+                studiesMap[studyUID].series[seriesUID].images.push({
+                    imageId: imageId,
+                    instanceNumber: instanceNumber,
+                    file: file
+                });
+
+            } catch (e) {
+                console.warn('Error parsing file:', file.name, e);
+            }
+        }
+
+        // Sort images in each series
+        for (const studyUID in studiesMap) {
+            for (const seriesUID in studiesMap[studyUID].series) {
+                studiesMap[studyUID].series[seriesUID].images.sort((a, b) =>
+                    a.instanceNumber - b.instanceNumber
+                );
+            }
+        }
+
+        this.studies = Object.values(studiesMap);
+    }
+
+    renderStudiesList() {
+        const container = document.getElementById('studies-list');
+
+        if (this.studies.length === 0) {
+            container.innerHTML = `
+                <div class="no-studies-message">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>Carga archivos DICOM para comenzar</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = this.studies.map((study, idx) => `
+            <div class="study-item" data-study-idx="${idx}">
+                <div class="study-header" onclick="viewer.toggleStudy(${idx})">
+                    <span class="study-icon"><i class="fas fa-hospital"></i></span>
+                    <div class="study-title">
+                        <h3>${study.description || `Estudio ${idx + 1}`} ${study.modality ? `(${study.modality})` : ''}</h3>
+                        <span>${Object.keys(study.series).length} series</span>
+                    </div>
+                </div>
+                <div class="series-list" id="series-${idx}">
+                    ${Object.values(study.series).map((series, sIdx) => {
+            const modality = series.modality || 'IMG';
+            const icon = modality === 'SR' ? '<i class="fas fa-file-medical-alt"></i>' : '<i class="fas fa-film"></i>';
+            const description = series.description ? ` - ${series.description}` : '';
+            const countLabel = modality === 'SR' ? 'SR' : series.images.length;
+            return `
+                            <div class="series-item" onclick="viewer.selectSeries(${idx}, '${series.id}')" title="${series.description || ''}">
+                                ${icon} Serie ${sIdx + 1}${description} (${countLabel})
+                            </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `).join('');
+    }
+
+    toggleStudy(idx) {
+        const seriesList = document.getElementById(`series-${idx}`);
+        seriesList.classList.toggle('expanded');
+    }
+
+    async selectSeries(studyIdx, seriesId) {
+        // Update UI
+        document.querySelectorAll('.series-item').forEach(el => el.classList.remove('active'));
+        event.target.classList.add('active');
+
+        const study = this.studies[studyIdx];
+        const series = study.series[seriesId];
+
+        this.currentSeries = series;
+        this.currentImageIndex = 0;
+
+        // Check if this is a Structured Report series
+        if (series.modality === 'SR') {
+            this.viewportInitialized = false;
+            await this.loadStructuredReport(series);
+            return;
+        }
+
+        // Initialize viewport
+        this.setupViewport();
+
+        // Create image IDs array
+        this.imageIds = series.images.map(img => img.imageId);
+        this.invalidImageIndices = new Set();
+
+        // Load first valid image
+        await this.loadFirstValidImage();
+        this.updateNavigation();
+    }
+
+    async loadFirstValidImage() {
+        for (let i = 0; i < this.imageIds.length; i++) {
+            if (this.invalidImageIndices.has(i)) continue;
+
+            const success = await this.tryLoadImage(i);
+            if (success) {
+                this.currentImageIndex = i;
+                return;
+            }
+        }
+
+        this.viewportInitialized = false;
+        await this.handleNonImageDicom(0);
+    }
+
+    async tryLoadImage(index) {
+        try {
+            if (!this.viewportInitialized) {
+                this.setupViewport();
+            }
+
+            const imageId = this.imageIds[index];
+            const image = await cornerstone.loadImage(imageId);
+            cornerstone.displayImage(this.element, image);
+            this.updateMetadata(image);
+            return true;
+        } catch (error) {
+            this.invalidImageIndices.add(index);
+            return false;
+        }
+    }
+
+    async loadStructuredReport(series) {
+        try {
+            if (this.element) {
+                try {
+                    cornerstone.disable(this.element);
+                } catch (e) { }
+                this.element = null;
+            }
+
+            const viewport = document.getElementById('dicom-viewport');
+            const file = series.images[0].file;
+            const arrayBuffer = await file.arrayBuffer();
+            const srContent = this.parseSRContent(arrayBuffer);
+
+            viewport.innerHTML = `
+                <div class="sr-viewer">
+                    <div class="sr-header">
+                        <h3><i class="fas fa-file-medical-alt"></i> Reporte Estructurado (SR)</h3>
+                    </div>
+                    <div class="sr-content">
+                        ${srContent}
+                    </div>
+                </div>
+            `;
+
+            this.imageIds = [];
+            document.getElementById('image-counter').textContent = 'Reporte';
+            this.updateNavigation();
+            this.updateSRMetadata(arrayBuffer);
+
+        } catch (error) {
+            console.error('Error loading SR:', error);
+            const viewport = document.getElementById('dicom-viewport');
+            viewport.innerHTML = `<div class="sr-viewer"><p style="color: #ef4444;">Error al cargar el reporte: ${error.message}</p></div>`;
+        }
+    }
+
+    parseSRContent(arrayBuffer) {
+        try {
+            const dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+            const texts = [];
+
+            for (let tag in dataSet.elements) {
+                const element = dataSet.elements[tag];
+                if (element.length && element.length < 10000) {
+                    try {
+                        const value = dataSet.string(tag);
+                        if (value && value.length > 2 && /[a-zA-Z]/.test(value)) {
+                            if (!value.match(/^[0-9.]+$/) && !value.match(/^[A-Z0-9]{64}$/)) {
+                                texts.push(value);
+                            }
+                        }
+                    } catch (e) { }
+                }
+            }
+
+            if (texts.length > 0) {
+                return texts.map(t => `<p>${t}</p>`).join('');
+            }
+            return '<p style="color: var(--text-secondary);">Este reporte no contiene texto legible directamente.</p>';
+        } catch (e) {
+            return `<p style="color: #ef4444;">No se pudo parsear el contenido del SR: ${e.message}</p>`;
+        }
+    }
+
+    updateSRMetadata(arrayBuffer) {
+        try {
+            const dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer));
+
+            const patientName = dataSet.string('x00100010') || 'Desconocido';
+            const patientId = dataSet.string('x00100020') || 'N/A';
+            const patientBirth = dataSet.string('x00100030') || 'N/A';
+            const patientSex = dataSet.string('x00100040') || 'N/A';
+            const studyDate = dataSet.string('x00080020') || 'N/A';
+            const studyDesc = dataSet.string('x00081030') || 'N/A';
+            const modality = dataSet.string('x00080060') || 'SR';
+            const institution = dataSet.string('x00080080') || 'N/A';
+
+            document.getElementById('patient-info').innerHTML = `
+                <div class="info-row"><span class="info-label">Nombre</span><span class="info-value">${patientName}</span></div>
+                <div class="info-row"><span class="info-label">ID</span><span class="info-value">${patientId}</span></div>
+                <div class="info-row"><span class="info-label">Nacimiento</span><span class="info-value">${this.formatDate(patientBirth)}</span></div>
+                <div class="info-row"><span class="info-label">Sexo</span><span class="info-value">${patientSex}</span></div>
+            `;
+
+            document.getElementById('study-info').innerHTML = `
+                <div class="info-row"><span class="info-label">Fecha</span><span class="info-value">${this.formatDate(studyDate)}</span></div>
+                <div class="info-row"><span class="info-label">Descripción</span><span class="info-value">${studyDesc}</span></div>
+                <div class="info-row"><span class="info-label">Modalidad</span><span class="info-value">${modality}</span></div>
+                <div class="info-row"><span class="info-label">Institución</span><span class="info-value">${institution}</span></div>
+            `;
+
+            document.getElementById('image-info').innerHTML = `
+                <div class="info-row"><span class="info-label">Tipo</span><span class="info-value">Reporte Estructurado</span></div>
+                <div class="info-row"><span class="info-label">Modalidad</span><span class="info-value">${modality}</span></div>
+            `;
+        } catch (e) {
+            console.error('Error parsing SR metadata:', e);
+        }
+    }
+
+    async loadImage(index, direction = 1) {
+        if (!this.imageIds.length || index < 0 || index >= this.imageIds.length) return;
+
+        if (this.invalidImageIndices && this.invalidImageIndices.has(index)) {
+            const nextIndex = index + direction;
+            if (nextIndex >= 0 && nextIndex < this.imageIds.length) {
+                return this.loadImage(nextIndex, direction);
+            }
+            return;
+        }
+
+        this.currentImageIndex = index;
+        const imageId = this.imageIds[index];
+
+        try {
+            if (!this.viewportInitialized) {
+                this.setupViewport();
+            }
+
+            const image = await cornerstone.loadImage(imageId);
+            cornerstone.displayImage(this.element, image);
+            this.updateMetadata(image);
+            this.updateNavigation();
+
+        } catch (error) {
+            if (!this.invalidImageIndices) {
+                this.invalidImageIndices = new Set();
+            }
+            this.invalidImageIndices.add(index);
+
+            const nextIndex = index + direction;
+            if (nextIndex >= 0 && nextIndex < this.imageIds.length) {
+                return this.loadImage(nextIndex, direction);
+            }
+
+            await this.handleNonImageDicom(index);
+        }
+    }
+
+    async handleNonImageDicom(index) {
+        try {
+            this.viewportInitialized = false;
+
+            if (this.element) {
+                try {
+                    cornerstone.disable(this.element);
+                } catch (e) { }
+                this.element = null;
+            }
+
+            const file = this.currentSeries.images[index].file;
+            const arrayBuffer = await file.arrayBuffer();
+            const srContent = this.parseSRContent(arrayBuffer);
+
+            const viewport = document.getElementById('dicom-viewport');
+            viewport.innerHTML = `
+                <div class="sr-viewer">
+                    <div class="sr-header">
+                        <h3><i class="fas fa-file-medical"></i> Documento DICOM (sin imagen)</h3>
+                    </div>
+                    <div class="sr-content">
+                        ${srContent}
+                    </div>
+                </div>
+            `;
+
+            this.updateSRMetadata(arrayBuffer);
+            this.updateNavigation();
+
+        } catch (e) {
+            console.error('Error handling non-image DICOM:', e);
+        }
+    }
+
+    updateMetadata(image) {
+        let patientName = 'Desconocido';
+        let patientId = 'N/A';
+        let patientBirth = 'N/A';
+        let patientSex = 'N/A';
+        let studyDate = 'N/A';
+        let studyDesc = 'N/A';
+        let modality = 'N/A';
+        let institution = 'N/A';
+
+        if (image.data && image.data.string) {
+            patientName = image.data.string('x00100010') || patientName;
+            patientId = image.data.string('x00100020') || patientId;
+            patientBirth = image.data.string('x00100030') || patientBirth;
+            patientSex = image.data.string('x00100040') || patientSex;
+            studyDate = image.data.string('x00080020') || studyDate;
+            studyDesc = image.data.string('x00081030') || studyDesc;
+            modality = image.data.string('x00080060') || modality;
+            institution = image.data.string('x00080080') || institution;
+        }
+
+        const viewport = cornerstone.getViewport(this.element);
+        const wc = viewport ? viewport.voi.windowCenter : 0;
+        const ww = viewport ? viewport.voi.windowWidth : 0;
+
+        document.getElementById('patient-info').innerHTML = `
+            <div class="info-row"><span class="info-label">Nombre</span><span class="info-value">${patientName}</span></div>
+            <div class="info-row"><span class="info-label">ID</span><span class="info-value">${patientId}</span></div>
+            <div class="info-row"><span class="info-label">Nacimiento</span><span class="info-value">${this.formatDate(patientBirth)}</span></div>
+            <div class="info-row"><span class="info-label">Sexo</span><span class="info-value">${patientSex}</span></div>
+        `;
+
+        document.getElementById('study-info').innerHTML = `
+            <div class="info-row"><span class="info-label">Fecha</span><span class="info-value">${this.formatDate(studyDate)}</span></div>
+            <div class="info-row"><span class="info-label">Descripción</span><span class="info-value">${studyDesc}</span></div>
+            <div class="info-row"><span class="info-label">Modalidad</span><span class="info-value">${modality}</span></div>
+            <div class="info-row"><span class="info-label">Institución</span><span class="info-value">${institution}</span></div>
+        `;
+
+        document.getElementById('image-info').innerHTML = `
+            <div class="info-row"><span class="info-label">Dimensiones</span><span class="info-value">${image.width} x ${image.height}</span></div>
+            <div class="info-row"><span class="info-label">Bits</span><span class="info-value">${image.bitsStored || 16} bits</span></div>
+            <div class="info-row"><span class="info-label">Window Center</span><span class="info-value" id="wc-value">${wc.toFixed(0)}</span></div>
+            <div class="info-row"><span class="info-label">Window Width</span><span class="info-value" id="ww-value">${ww.toFixed(0)}</span></div>
+        `;
+    }
+
+    formatDate(dateStr) {
+        if (!dateStr || dateStr.length !== 8) return dateStr;
+        return `${dateStr.slice(6, 8)}/${dateStr.slice(4, 6)}/${dateStr.slice(0, 4)}`;
+    }
+
+    setupEventListeners() {
+        // Tool buttons
+        document.getElementById('tool-pan').onclick = () => this.setTool('pan');
+        document.getElementById('tool-zoom').onclick = () => this.setTool('zoom');
+        document.getElementById('tool-wwwc').onclick = () => this.setTool('wwwc');
+        document.getElementById('tool-length').onclick = () => this.setTool('length');
+        document.getElementById('tool-reset').onclick = () => this.resetView();
+
+        // Navigation
+        document.getElementById('prev-image').onclick = () => this.navigate(-1);
+        document.getElementById('next-image').onclick = () => this.navigate(1);
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') this.navigate(-1);
+            if (e.key === 'ArrowDown' || e.key === 'ArrowRight') this.navigate(1);
+        });
+    }
+
+    setupViewportEvents() {
+        const container = document.getElementById('dicom-viewport');
+
+        let isDragging = false;
+        let lastPos = { x: 0, y: 0 };
+
+        container.addEventListener('mousedown', (e) => {
+            if (!this.element) return;
+
+            // Handle measurement tool
+            if (this.activeTool === 'length') {
+                const rect = this.element.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                const imagePoint = cornerstone.pageToPixel(this.element, e.pageX, e.pageY);
+
+                if (!this.isDrawingMeasurement) {
+                    this.isDrawingMeasurement = true;
+                    this.measurementStart = imagePoint;
+                    this.currentMeasurement = {
+                        start: imagePoint,
+                        end: imagePoint,
+                        imageIndex: this.currentImageIndex
+                    };
+                }
+                return;
+            }
+
+            isDragging = true;
+            lastPos = { x: e.clientX, y: e.clientY };
+        });
+
+        container.addEventListener('mousemove', (e) => {
+            if (!this.element) return;
+
+            // Handle measurement drawing
+            if (this.activeTool === 'length' && this.isDrawingMeasurement) {
+                const imagePoint = cornerstone.pageToPixel(this.element, e.pageX, e.pageY);
+                this.currentMeasurement.end = imagePoint;
+                this.drawMeasurements();
+                return;
+            }
+
+            if (!isDragging) return;
+
+            const dx = e.clientX - lastPos.x;
+            const dy = e.clientY - lastPos.y;
+            lastPos = { x: e.clientX, y: e.clientY };
+
+            const viewport = cornerstone.getViewport(this.element);
+            if (!viewport) return;
+
+            if (this.activeTool === 'wwwc') {
+                viewport.voi.windowWidth += dx * 2;
+                viewport.voi.windowCenter += dy;
+                cornerstone.setViewport(this.element, viewport);
+
+                const wcEl = document.getElementById('wc-value');
+                const wwEl = document.getElementById('ww-value');
+                if (wcEl) wcEl.textContent = viewport.voi.windowCenter.toFixed(0);
+                if (wwEl) wwEl.textContent = viewport.voi.windowWidth.toFixed(0);
+            } else if (this.activeTool === 'pan') {
+                viewport.translation.x += dx;
+                viewport.translation.y += dy;
+                cornerstone.setViewport(this.element, viewport);
+            } else if (this.activeTool === 'zoom') {
+                viewport.scale += dy * 0.01;
+                viewport.scale = Math.max(0.1, Math.min(10, viewport.scale));
+                cornerstone.setViewport(this.element, viewport);
+            }
+        });
+
+        container.addEventListener('mouseup', (e) => {
+            // Finish measurement
+            if (this.activeTool === 'length' && this.isDrawingMeasurement) {
+                const imagePoint = cornerstone.pageToPixel(this.element, e.pageX, e.pageY);
+                this.currentMeasurement.end = imagePoint;
+                this.measurements.push({ ...this.currentMeasurement });
+                this.isDrawingMeasurement = false;
+                this.currentMeasurement = null;
+                this.drawMeasurements();
+                return;
+            }
+            isDragging = false;
+        });
+
+        container.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        // Mouse wheel for scroll
+        container.addEventListener('wheel', (e) => {
+            if (!this.imageIds.length) return;
+            e.preventDefault();
+            this.navigate(e.deltaY > 0 ? 1 : -1);
+        }, { passive: false });
+    }
+
+    drawMeasurements() {
+        if (!this.element) return;
+
+        // Get or create the SVG overlay
+        let svg = this.element.querySelector('.measurement-overlay');
+        if (!svg) {
+            svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.classList.add('measurement-overlay');
+            svg.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;';
+            this.element.appendChild(svg);
+        }
+
+        svg.innerHTML = '';
+
+        // Get pixel spacing from current image for accurate measurement
+        const pixelSpacing = this.getPixelSpacing();
+
+        // Draw all measurements for current image
+        const measurementsToDraw = this.measurements.filter(m => m.imageIndex === this.currentImageIndex);
+
+        // Add current measurement being drawn
+        if (this.currentMeasurement && this.currentMeasurement.imageIndex === this.currentImageIndex) {
+            measurementsToDraw.push(this.currentMeasurement);
+        }
+
+        measurementsToDraw.forEach(measurement => {
+            const start = cornerstone.pixelToCanvas(this.element, measurement.start);
+            const end = cornerstone.pixelToCanvas(this.element, measurement.end);
+
+            // Draw line
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', start.x);
+            line.setAttribute('y1', start.y);
+            line.setAttribute('x2', end.x);
+            line.setAttribute('y2', end.y);
+            line.setAttribute('stroke', '#00ff00');
+            line.setAttribute('stroke-width', '2');
+            svg.appendChild(line);
+
+            // Draw endpoints
+            [start, end].forEach(point => {
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', point.x);
+                circle.setAttribute('cy', point.y);
+                circle.setAttribute('r', '4');
+                circle.setAttribute('fill', '#00ff00');
+                svg.appendChild(circle);
+            });
+
+            // Calculate distance in mm
+            const dx = measurement.end.x - measurement.start.x;
+            const dy = measurement.end.y - measurement.start.y;
+            const dxMm = dx * pixelSpacing.x;
+            const dyMm = dy * pixelSpacing.y;
+            const distance = Math.sqrt(dxMm * dxMm + dyMm * dyMm);
+
+            // Show ~ prefix if using estimated pixel spacing
+            const prefix = pixelSpacing.estimated ? '~' : '';
+            const displayText = `${prefix}${distance.toFixed(1)} mm`;
+
+            // Draw text label
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+
+            // Calculate text width for background
+            const textWidth = displayText.length * 7 + 10;
+
+            // Background for text
+            const textBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            textBg.setAttribute('x', midX - textWidth / 2);
+            textBg.setAttribute('y', midY - 20);
+            textBg.setAttribute('width', textWidth);
+            textBg.setAttribute('height', '18');
+            textBg.setAttribute('fill', 'rgba(0,0,0,0.7)');
+            textBg.setAttribute('rx', '3');
+            svg.appendChild(textBg);
+
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', midX);
+            text.setAttribute('y', midY - 7);
+            text.setAttribute('fill', pixelSpacing.estimated ? '#ffcc00' : '#00ff00');
+            text.setAttribute('font-size', '12');
+            text.setAttribute('font-family', 'Arial, sans-serif');
+            text.setAttribute('text-anchor', 'middle');
+            text.textContent = displayText;
+            svg.appendChild(text);
+        });
+    }
+
+    getPixelSpacing() {
+        try {
+            // Try to get from loaded image
+            const enabledElement = cornerstone.getEnabledElement(this.element);
+            if (enabledElement && enabledElement.image) {
+                const image = enabledElement.image;
+
+                // Method 1: Check rowPixelSpacing and columnPixelSpacing (set by cornerstone)
+                if (image.rowPixelSpacing && image.columnPixelSpacing) {
+                    return {
+                        y: image.rowPixelSpacing,
+                        x: image.columnPixelSpacing
+                    };
+                }
+
+                // Method 2: Get from DICOM data directly
+                if (image.data && image.data.string) {
+                    // Try Pixel Spacing (0028,0030)
+                    let pixelSpacingStr = image.data.string('x00280030');
+
+                    // If not found, try Imager Pixel Spacing (0018,1164) - common in X-ray/mammography
+                    if (!pixelSpacingStr) {
+                        pixelSpacingStr = image.data.string('x00181164');
+                    }
+
+                    if (pixelSpacingStr) {
+                        const parts = pixelSpacingStr.split('\\');
+                        if (parts.length >= 2) {
+                            const rowSpacing = parseFloat(parts[0]);
+                            const colSpacing = parseFloat(parts[1]);
+                            if (!isNaN(rowSpacing) && !isNaN(colSpacing) && rowSpacing > 0 && colSpacing > 0) {
+                                return {
+                                    y: rowSpacing,
+                                    x: colSpacing
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Could not get pixel spacing:', e);
+        }
+
+        // Return a default value of 1mm per pixel if no calibration data available
+        // This allows measurements but shows a warning
+        return { x: 1, y: 1, estimated: true };
+    }
+
+    clearMeasurements() {
+        this.measurements = this.measurements.filter(m => m.imageIndex !== this.currentImageIndex);
+        this.drawMeasurements();
+    }
+
+    setTool(tool) {
+        this.activeTool = tool;
+        document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`tool-${tool}`).classList.add('active');
+    }
+
+    resetView() {
+        if (!this.element) return;
+        cornerstone.reset(this.element);
+        const viewport = cornerstone.getViewport(this.element);
+        if (viewport) {
+            const wcEl = document.getElementById('wc-value');
+            const wwEl = document.getElementById('ww-value');
+            if (wcEl) wcEl.textContent = viewport.voi.windowCenter.toFixed(0);
+            if (wwEl) wwEl.textContent = viewport.voi.windowWidth.toFixed(0);
+        }
+        // Clear measurements for current image
+        this.clearMeasurements();
+    }
+
+    navigate(direction) {
+        if (!this.imageIds.length) return;
+
+        const newIndex = this.currentImageIndex + direction;
+        if (newIndex >= 0 && newIndex < this.imageIds.length) {
+            this.loadImage(newIndex, direction);
+        }
+    }
+
+    updateNavigation() {
+        const total = this.imageIds.length;
+        if (total === 0) {
+            document.getElementById('image-counter').textContent = 'Reporte';
+            document.getElementById('prev-image').disabled = true;
+            document.getElementById('next-image').disabled = true;
+        } else {
+            document.getElementById('image-counter').textContent = `${this.currentImageIndex + 1} / ${total}`;
+            document.getElementById('prev-image').disabled = this.currentImageIndex <= 0;
+            document.getElementById('next-image').disabled = this.currentImageIndex >= total - 1;
+        }
+    }
+}
+
+// Initialize viewer when DOM is ready
+window.addEventListener('DOMContentLoaded', () => {
+    window.viewer = new DicomViewer();
+});
