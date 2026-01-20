@@ -30,6 +30,7 @@ class DicomViewer {
     init() {
         this.setupEventListeners();
         this.setupDropZone();
+        this.setupScrollbarEvents();
     }
 
     setupViewport() {
@@ -234,6 +235,9 @@ class DicomViewer {
         this.currentSeries = series;
         this.currentImageIndex = 0;
 
+        // Reset wheel scroll state when changing series
+        this.resetWheelScroll();
+
         // Check if this is a Structured Report series
         if (series.modality === 'SR') {
             this.viewportInitialized = false;
@@ -333,7 +337,7 @@ class DicomViewer {
         container.innerHTML = this.studies.map((study, idx) => `
             <div class="study-item" data-study-idx="${idx}">
                 <div class="study-header" onclick="viewer.toggleStudy(${idx})">
-                    <span class="study-icon"><i class="fas fa-hospital"></i></span>
+                    <span class="study-icon"><i class="fas fa-x-ray"></i></span>
                     <div class="study-title">
                         <h3>${study.description || `Estudio ${idx + 1}`} ${study.modality ? `(${study.modality})` : ''}</h3>
                         <span>${Object.keys(study.series).length} series</span>
@@ -371,6 +375,9 @@ class DicomViewer {
 
         this.currentSeries = series;
         this.currentImageIndex = 0;
+
+        // Reset wheel scroll state when changing series
+        this.resetWheelScroll();
 
         // Check if this is a Structured Report series
         if (series.modality === 'SR') {
@@ -651,12 +658,20 @@ class DicomViewer {
     }
 
     setupEventListeners() {
-        // Tool buttons
         document.getElementById('tool-pan').onclick = () => this.setTool('pan');
         document.getElementById('tool-zoom').onclick = () => this.setTool('zoom');
         document.getElementById('tool-wwwc').onclick = () => this.setTool('wwwc');
         document.getElementById('tool-length').onclick = () => this.setTool('length');
+        document.getElementById('tool-stackscroll').onclick = () => this.setTool('stackscroll');
         document.getElementById('tool-reset').onclick = () => this.resetView();
+
+        // About modal
+        document.getElementById('btn-about').onclick = () => this.openAboutModal();
+
+        // Close modal on overlay click
+        document.getElementById('about-modal').onclick = (e) => {
+            if (e.target.id === 'about-modal') this.closeAboutModal();
+        };
 
         // Navigation
         document.getElementById('prev-image').onclick = () => this.navigate(-1);
@@ -666,7 +681,50 @@ class DicomViewer {
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') this.navigate(-1);
             if (e.key === 'ArrowDown' || e.key === 'ArrowRight') this.navigate(1);
+            if (e.key === 'Escape') this.closeAboutModal();
         });
+    }
+
+    openAboutModal() {
+        const modal = document.getElementById('about-modal');
+        const browserInfo = document.getElementById('browser-info');
+
+        // Detect browser and OS
+        const ua = navigator.userAgent;
+        let browser = 'Desconocido';
+        let os = 'Desconocido';
+
+        // Browser detection
+        if (ua.includes('Chrome') && !ua.includes('Edg')) {
+            const match = ua.match(/Chrome\/(\d+)/);
+            browser = `Chrome ${match ? match[1] : ''}`;
+        } else if (ua.includes('Firefox')) {
+            const match = ua.match(/Firefox\/(\d+)/);
+            browser = `Firefox ${match ? match[1] : ''}`;
+        } else if (ua.includes('Safari') && !ua.includes('Chrome')) {
+            const match = ua.match(/Version\/(\d+)/);
+            browser = `Safari ${match ? match[1] : ''}`;
+        } else if (ua.includes('Edg')) {
+            const match = ua.match(/Edg\/(\d+)/);
+            browser = `Edge ${match ? match[1] : ''}`;
+        }
+
+        // OS detection
+        if (ua.includes('Mac OS')) {
+            const match = ua.match(/Mac OS X (\d+[._]\d+)/);
+            os = `macOS ${match ? match[1].replace('_', '.') : ''}`;
+        } else if (ua.includes('Windows')) {
+            os = 'Windows';
+        } else if (ua.includes('Linux')) {
+            os = 'Linux';
+        }
+
+        browserInfo.textContent = `${browser}, ${os}`;
+        modal.classList.remove('hidden');
+    }
+
+    closeAboutModal() {
+        document.getElementById('about-modal').classList.add('hidden');
     }
 
     setupViewportEvents() {
@@ -721,7 +779,20 @@ class DicomViewer {
             const viewport = cornerstone.getViewport(this.element);
             if (!viewport) return;
 
-            if (this.activeTool === 'wwwc') {
+            if (this.activeTool === 'stackscroll') {
+                // Stack scroll: navigate images based on vertical movement
+                if (!this.stackScrollAccumulator) this.stackScrollAccumulator = 0;
+                this.stackScrollAccumulator += dy;
+
+                // Threshold for changing image (pixels of movement needed)
+                const threshold = 30;
+
+                if (Math.abs(this.stackScrollAccumulator) >= threshold) {
+                    const direction = this.stackScrollAccumulator > 0 ? 1 : -1;
+                    this.navigate(direction);
+                    this.stackScrollAccumulator = 0;
+                }
+            } else if (this.activeTool === 'wwwc') {
                 viewport.voi.windowWidth += dx * 2;
                 viewport.voi.windowCenter += dy;
                 cornerstone.setViewport(this.element, viewport);
@@ -753,17 +824,45 @@ class DicomViewer {
                 return;
             }
             isDragging = false;
+            this.stackScrollAccumulator = 0;
         });
 
         container.addEventListener('mouseleave', () => {
             isDragging = false;
+            this.stackScrollAccumulator = 0;
         });
 
-        // Mouse wheel for scroll
+        // Mouse wheel/trackpad for controlled image scrolling
+        this.wheelAccumulator = 0;
+        this.isWheelScrolling = false;
+        this.wheelScrollTimeout = null;
+        const scrollDelay = 30; // Very fast image transitions
+        const trackpadThreshold = 150; // Higher threshold to prevent skipping
+
         container.addEventListener('wheel', (e) => {
             if (!this.imageIds.length) return;
             e.preventDefault();
-            this.navigate(e.deltaY > 0 ? 1 : -1);
+
+            // Completely ignore scroll events during blocking period
+            if (this.isWheelScrolling) return;
+
+            // Accumulate delta
+            this.wheelAccumulator += e.deltaY;
+
+            // Only change image if accumulated enough delta
+            if (Math.abs(this.wheelAccumulator) >= trackpadThreshold) {
+                const direction = this.wheelAccumulator > 0 ? 1 : -1;
+                this.navigate(direction);
+
+                // Reset and block further changes
+                this.wheelAccumulator = 0;
+                this.isWheelScrolling = true;
+                clearTimeout(this.wheelScrollTimeout);
+                this.wheelScrollTimeout = setTimeout(() => {
+                    this.isWheelScrolling = false;
+                    this.wheelAccumulator = 0;
+                }, scrollDelay);
+            }
         }, { passive: false });
     }
 
@@ -910,6 +1009,15 @@ class DicomViewer {
         this.drawMeasurements();
     }
 
+    resetWheelScroll() {
+        this.wheelAccumulator = 0;
+        this.isWheelScrolling = false;
+        if (this.wheelScrollTimeout) {
+            clearTimeout(this.wheelScrollTimeout);
+            this.wheelScrollTimeout = null;
+        }
+    }
+
     setTool(tool) {
         this.activeTool = tool;
         document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
@@ -941,15 +1049,108 @@ class DicomViewer {
 
     updateNavigation() {
         const total = this.imageIds.length;
+        const stackScrollBtn = document.getElementById('tool-stackscroll');
+        const imageScrollbar = document.getElementById('image-scrollbar');
+        const scrollbarThumb = document.getElementById('scrollbar-thumb');
+
         if (total === 0) {
             document.getElementById('image-counter').textContent = 'Reporte';
             document.getElementById('prev-image').disabled = true;
             document.getElementById('next-image').disabled = true;
+            if (stackScrollBtn) {
+                stackScrollBtn.disabled = true;
+                stackScrollBtn.title = 'Scroll de Imágenes (no disponible)';
+            }
+            if (imageScrollbar) {
+                imageScrollbar.classList.add('hidden');
+            }
+        } else if (total === 1) {
+            document.getElementById('image-counter').textContent = `${this.currentImageIndex + 1} / ${total}`;
+            document.getElementById('prev-image').disabled = true;
+            document.getElementById('next-image').disabled = true;
+            if (stackScrollBtn) {
+                stackScrollBtn.disabled = true;
+                stackScrollBtn.title = 'Scroll de Imágenes (solo 1 imagen)';
+            }
+            if (imageScrollbar) {
+                imageScrollbar.classList.add('hidden');
+            }
         } else {
             document.getElementById('image-counter').textContent = `${this.currentImageIndex + 1} / ${total}`;
             document.getElementById('prev-image').disabled = this.currentImageIndex <= 0;
             document.getElementById('next-image').disabled = this.currentImageIndex >= total - 1;
+            if (stackScrollBtn) {
+                stackScrollBtn.disabled = false;
+                stackScrollBtn.title = 'Scroll de Imágenes - Navega con click sostenido';
+            }
+
+            // Show and update image scrollbar
+            if (imageScrollbar && scrollbarThumb) {
+                imageScrollbar.classList.remove('hidden');
+
+                // Calculate thumb size and position
+                const thumbHeight = Math.max(8, 100 / total); // Percentage height
+                const thumbPosition = (this.currentImageIndex / (total - 1)) * (100 - thumbHeight);
+
+                scrollbarThumb.style.height = `${thumbHeight}%`;
+                scrollbarThumb.style.top = `${thumbPosition}%`;
+            }
         }
+    }
+
+    setupScrollbarEvents() {
+        const scrollbar = document.getElementById('image-scrollbar');
+        const track = scrollbar?.querySelector('.scrollbar-track');
+        const thumb = document.getElementById('scrollbar-thumb');
+
+        if (!track || !thumb) return;
+
+        let isDraggingThumb = false;
+
+        // Click on track to jump to position
+        track.addEventListener('click', (e) => {
+            if (isDraggingThumb) return;
+            if (!this.imageIds.length || this.imageIds.length <= 1) return;
+
+            const rect = track.getBoundingClientRect();
+            const clickY = e.clientY - rect.top;
+            const percentage = clickY / rect.height;
+            const newIndex = Math.round(percentage * (this.imageIds.length - 1));
+
+            if (newIndex >= 0 && newIndex < this.imageIds.length && newIndex !== this.currentImageIndex) {
+                this.loadImage(newIndex);
+            }
+        });
+
+        // Drag thumb
+        thumb.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            isDraggingThumb = true;
+            document.body.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDraggingThumb) return;
+            if (!this.imageIds.length || this.imageIds.length <= 1) return;
+
+            const rect = track.getBoundingClientRect();
+            const mouseY = e.clientY - rect.top;
+            const percentage = Math.max(0, Math.min(1, mouseY / rect.height));
+            const newIndex = Math.round(percentage * (this.imageIds.length - 1));
+
+            if (newIndex >= 0 && newIndex < this.imageIds.length && newIndex !== this.currentImageIndex) {
+                this.loadImage(newIndex);
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDraggingThumb) {
+                isDraggingThumb = false;
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            }
+        });
     }
 }
 

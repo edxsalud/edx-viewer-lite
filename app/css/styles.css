@@ -8,8 +8,8 @@
     --bg-primary: #0f0f1a;
     --bg-secondary: #1a1a2e;
     --bg-tertiary: #16213e;
-    --accent: #0ea5e9;
-    --accent-hover: #38bdf8;
+    --accent: #6B57EB;
+    --accent-hover: #8A7AEF;
     --text-primary: #f1f5f9;
     --text-secondary: #94a3b8;
     --border: #334155;
@@ -57,28 +57,44 @@ body {
 }
 
 .logo-container {
-    padding: 20px;
+    padding: 16px 20px;
     display: flex;
-    justify-content: flex-start;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
 }
 
 .app-logo {
-    height: 32px;
+    height: 35px;
     width: auto;
     object-fit: contain;
 }
 
+.app-branding {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-name {
+    font-size: 12px;
+    font-weight: 300;
+    color: var(--text-secondary);
+    letter-spacing: 1.5px;
+    text-transform: lowercase;
+    opacity: 0.8;
+}
+
 .app-version {
-    margin-left: 10px;
-    font-size: 11px;
+    font-size: 9px;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
-    padding: 3px 8px;
-    border-radius: 4px;
+    padding: 2px 2px;
+    border-radius: 3px;
     font-weight: 500;
+    opacity: 0.7;
 }
 
 .sidebar-header {
@@ -109,7 +125,7 @@ body {
     justify-content: center;
     gap: 8px;
     padding: 10px 16px;
-    background: var(--accent);
+    background: var(--bg-tertiary);
     border: none;
     border-radius: 6px;
     color: white;
@@ -120,7 +136,7 @@ body {
 }
 
 .upload-btn:hover {
-    background: #0284c7;
+    background: var(--accent);
     transform: translateY(-1px);
 }
 
@@ -315,10 +331,56 @@ body {
 .viewer-container {
     flex: 1;
     display: flex;
-    align-items: center;
+    align-items: stretch;
     justify-content: center;
     padding: 16px;
     background: #000;
+    position: relative;
+}
+
+/* Image Stack Scrollbar */
+.image-scrollbar {
+    width: 12px;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 0;
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.image-scrollbar.hidden {
+    display: none;
+}
+
+.scrollbar-track {
+    width: 6px;
+    height: 100%;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    position: relative;
+    cursor: pointer;
+    border: 1px solid var(--border);
+}
+
+.scrollbar-thumb {
+    position: absolute;
+    width: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+    min-height: 8px;
+    cursor: grab;
+    transition: background 0.2s;
+}
+
+.scrollbar-thumb:hover {
+    background: var(--accent-hover);
+}
+
+.scrollbar-thumb:active {
+    cursor: grabbing;
+    background: var(--accent-hover);
 }
 
 .viewport {
@@ -594,4 +656,154 @@ body {
     background: var(--bg-tertiary);
     border-radius: 6px;
     border-left: 3px solid var(--accent);
+}
+
+/* Sidebar Footer & About Button */
+.sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.about-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+
+.about-btn:hover {
+    color: white;
+    background: var(--accent);
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+}
+
+.modal-overlay.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    width: 380px;
+    max-width: 90%;
+    border: 1px solid var(--border);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.modal-close:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 30px;
+    text-align: center;
+}
+
+.about-logo img {
+    height: 50px;
+    margin-bottom: 16px;
+    opacity: 0.9;
+}
+
+.about-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.about-version {
+    font-size: 20px;
+    color: var(--accent);
+    font-weight: 500;
+    margin-bottom: 20px;
+}
+
+.about-info {
+    margin-bottom: 20px;
+}
+
+.about-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.about-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.about-value {
+    font-size: 12px;
+    color: var(--text-primary);
+    opacity: 0.8;
+}
+
+.about-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.about-link:hover {
+    background: var(--accent);
+    color: white;
 }

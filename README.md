@@ -7,7 +7,7 @@
 ![Versión](https://img.shields.io/badge/versión-1.0.0-blue?style=for-the-badge)
 ![Licencia](https://img.shields.io/badge/licencia-GPL--3.0-green?style=for-the-badge)
 
-**Visor de imágenes médicas DICOM 100% basado en web (client-side).** Funciona abriendo directamente `index.html` en un navegador sin necesidad de servidor ni instalación.
+**Visor de imágenes médicas DICOM 100% basado en web (client-side).** Funciona abriendo directamente `visor.html` en un navegador sin necesidad de servidor ni instalación.
 
 > ⚠️ **Aviso:** Este software es solo para uso académico e investigación. No está destinado ni autorizado para diagnóstico médico.
 
@@ -38,10 +38,15 @@
   - Zoom
   - Window/Level (Brillo/Contraste)
   - **Medir** (Regla para medir distancias en mm)
+  - **Stack Scroll**: Navegación optimizada para mouse y trackpad con sensibilidad ajustada para evitar saltos.
   - Reset
-- **🔀 Navegación**: Scroll del ratón o botones Anterior/Siguiente
+- **🔀 Navegación Avanzada**:
+  - Rueda del ratón / Trackpad (controlado y sin saltos)
+  - **Barra de Scroll Lateral**: Indicador visual y control de arrastre en el lado derecho
+  - Botones Anterior/Siguiente
 - **📋 Metadatos**: Panel derecho con información del paciente, estudio e imagen
 - **📄 Reportes SR**: Visualización de Structured Reports como texto
+- **ℹ️ Información del Sistema**: Modal "Acerca de" con detección automática de versión de navegador y SO
 - **📖 Instrucciones**: Panel central con guía de uso paso a paso
 
 ## 🛠️ Tecnologías Utilizadas
@@ -59,7 +64,7 @@
 
 ```
 EDX Viewer/
-├── index.html          # Página principal
+├── visor.html          # Página principal
 ├── app.js              # Lógica de la aplicación
 ├── styles.css          # Estilos CSS
 ├── logo-edx-white.png  # Logo de la empresa
@@ -70,7 +75,7 @@ EDX Viewer/
 
 ## 🚦 Cómo Usar
 
-1. **Abrir** `index.html` directamente en Chrome, Firefox o Safari
+1. **Abrir** `visor.html` directamente en Chrome, Firefox o Safari
 2. **Hacer clic** en el botón "Cargar Carpeta DICOM"
 3. **Seleccionar** una carpeta con archivos `.dcm`
 4. **Hacer clic** en una serie del panel izquierdo para visualizar las imágenes

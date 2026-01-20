@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EDX DICOM Viewer</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="app/css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 
     <!-- Cornerstone Libraries from CDN -->
@@ -22,8 +22,10 @@
         <!-- Left Panel: Studies List -->
         <aside class="sidebar">
             <div class="logo-container">
-                <img src="logo-edx-white.png" alt="EDX Logo" class="app-logo">
-                <span class="app-version">v1.0.0</span>
+                <img src="app/images/logo-edx-white.png" alt="EDX Logo" class="app-logo">
+                <div class="app-branding">
+                    <span class="app-version">Viewer Lite v1.0.0</span>
+                </div>
             </div>
             <div class="sidebar-header">
                 <h1><i class="fas fa-notes-medical"></i> Estudios</h1>
@@ -47,7 +49,40 @@
                 <i class="fas fa-exclamation-triangle"></i>
                 Solo para uso académico e investigación. No apto para diagnóstico médico.
             </div>
+            <div class="sidebar-footer">
+                <button id="btn-about" class="about-btn">
+                    <i class="fas fa-info-circle"></i> Acerca de
+                </button>
+            </div>
         </aside>
+
+        <!-- About Modal -->
+        <div id="about-modal" class="modal-overlay hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span>Sobre EDX Viewer Lite</span>
+                    <button class="modal-close" onclick="viewer.closeAboutModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="about-logo">
+                        <img src="app/images/logo-edx-white.png" alt="EDX Logo">
+                    </div>
+                    <h2 class="about-title">EDX Viewer Lite</h2>
+                    <div class="about-version">1.0.0</div>
+                    <div class="about-info">
+                        <div class="about-row">
+                            <span class="about-label">Navegador & SO</span>
+                            <span id="browser-info" class="about-value">-</span>
+                        </div>
+                    </div>
+                    <a href="https://github.com/edxsalud/edx-viewer-lite" target="_blank" class="about-link">
+                        <i class="fab fa-github"></i> github.com/edxsalud/edx-viewer-lite
+                    </a>
+                </div>
+            </div>
+        </div>
 
         <!-- Main Content -->
         <main class="main-content">
@@ -65,6 +100,9 @@
                     </button>
                     <button id="tool-length" class="tool-btn" title="Medir distancia">
                         <i class="fas fa-ruler"></i> Medir
+                    </button>
+                    <button id="tool-stackscroll" class="tool-btn" title="Scroll de Imágenes" disabled>
+                        <i class="fas fa-layer-group"></i> Scroll
                     </button>
                     <button id="tool-reset" class="tool-btn" title="Resetear vista">
                         <i class="fas fa-undo"></i> Reset
@@ -110,6 +148,12 @@
                         </div>
                     </div>
                 </div>
+                <!-- Image Stack Scrollbar (Right side) -->
+                <div id="image-scrollbar" class="image-scrollbar hidden">
+                    <div class="scrollbar-track">
+                        <div id="scrollbar-thumb" class="scrollbar-thumb"></div>
+                    </div>
+                </div>
             </div>
         </main>
 
@@ -144,7 +188,7 @@
         </aside>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app/js/app.js"></script>
 </body>
 
 </html>
