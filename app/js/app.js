@@ -57,6 +57,11 @@ class DicomViewer {
 
         // Re-setup mouse events on new element
         this.setupViewportEvents();
+
+        // Listen for image rendered event to redraw measurements on pan/zoom
+        this.element.addEventListener('cornerstoneimagerendered', () => {
+            this.drawMeasurements();
+        });
     }
 
     setupDropZone() {
@@ -952,6 +957,45 @@ class DicomViewer {
             text.setAttribute('text-anchor', 'middle');
             text.textContent = displayText;
             svg.appendChild(text);
+
+            // Add delete button (X) if it's not the current measurement being drawn
+            if (measurement !== this.currentMeasurement) {
+                const deleteBtnGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+                deleteBtnGroup.style.cursor = 'pointer';
+                deleteBtnGroup.style.pointerEvents = 'all'; // Enable clicks on this group
+
+                const btnX = midX + textWidth / 2 + 10;
+                const btnY = midY - 11;
+
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', btnX);
+                circle.setAttribute('cy', btnY);
+                circle.setAttribute('r', '8');
+                circle.setAttribute('fill', '#ff4444');
+                circle.setAttribute('stroke', '#fff');
+                circle.setAttribute('stroke-width', '1');
+
+                const xMark = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                xMark.setAttribute('x', btnX);
+                xMark.setAttribute('y', btnY + 3);
+                xMark.setAttribute('text-anchor', 'middle');
+                xMark.setAttribute('fill', '#fff');
+                xMark.setAttribute('font-size', '10');
+                xMark.setAttribute('font-weight', 'bold');
+                xMark.setAttribute('font-family', 'Arial, sans-serif');
+                xMark.textContent = '×';
+
+                deleteBtnGroup.appendChild(circle);
+                deleteBtnGroup.appendChild(xMark);
+
+                // Add click event to remove this specific measurement
+                deleteBtnGroup.addEventListener('mousedown', (e) => {
+                    e.stopPropagation(); // Prevent starting a new tool action
+                    this.removeMeasurement(measurement);
+                });
+
+                svg.appendChild(deleteBtnGroup);
+            }
         });
     }
 
@@ -1002,6 +1046,11 @@ class DicomViewer {
         // Return a default value of 1mm per pixel if no calibration data available
         // This allows measurements but shows a warning
         return { x: 1, y: 1, estimated: true };
+    }
+
+    removeMeasurement(measurementToRemove) {
+        this.measurements = this.measurements.filter(m => m !== measurementToRemove);
+        this.drawMeasurements();
     }
 
     clearMeasurements() {
