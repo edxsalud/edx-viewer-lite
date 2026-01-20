@@ -1,7 +1,7 @@
 # EDX DICOM Viewer
 
 <p align="center">
-  <img src="logo-edx-white.png" alt="EDX Logo" width="200">
+  <img src="app/images/logo-edx-white.png" alt="EDX Logo" width="200">
 </p>
 
 ![Versión](https://img.shields.io/badge/versión-1.0.0-blue?style=for-the-badge)
@@ -64,13 +64,14 @@
 
 ```
 EDX Viewer/
-├── visor.html          # Página principal
-├── app.js              # Lógica de la aplicación
-├── styles.css          # Estilos CSS
-├── logo-edx-white.png  # Logo de la empresa
-├── README.md           # Este archivo
-├── LICENSE             # Licencia GPL-3.0
-└── DICOM/              # Carpeta de ejemplo con archivos DICOM
+├── visor.html                  # Página principal
+├── app/
+│   ├── js/app.js               # Lógica de la aplicación
+│   ├── css/styles.css          # Estilos CSS
+│   └── images/logo-edx-white.png # Logo de la empresa
+├── README.md                   # Este archivo
+├── LICENSE                     # Licencia GPL-3.0
+└── DICOM/                      # Carpeta de ejemplo con archivos DICOM
 ```
 
 ## 🚦 Cómo Usar
