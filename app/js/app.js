@@ -678,6 +678,19 @@ class DicomViewer {
             if (e.target.id === 'about-modal') this.closeAboutModal();
         };
 
+        // Download modal
+        document.getElementById('tool-download').onclick = () => this.openDownloadModal();
+
+        document.getElementById('download-modal').onclick = (e) => {
+            if (e.target.id === 'download-modal') this.closeDownloadModal();
+        };
+
+        // Download input changes - Add listeners for ALL inputs affecting preview
+        ['download-width', 'download-height', 'download-format', 'download-annotations', 'download-warning'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', () => this.updateDownloadPreview());
+        });
+
         // Navigation
         document.getElementById('prev-image').onclick = () => this.navigate(-1);
         document.getElementById('next-image').onclick = () => this.navigate(1);
@@ -688,6 +701,317 @@ class DicomViewer {
             if (e.key === 'ArrowDown' || e.key === 'ArrowRight') this.navigate(1);
             if (e.key === 'Escape') this.closeAboutModal();
         });
+    }
+
+    openDownloadModal() {
+        if (!this.element) return;
+
+        const modal = document.getElementById('download-modal');
+        const enabledElement = cornerstone.getEnabledElement(this.element);
+        const image = enabledElement.image;
+
+        // Set default values
+        document.getElementById('download-width').value = image.width;
+        document.getElementById('download-height').value = image.height;
+        document.getElementById('download-filename').value = 'Image';
+
+        modal.classList.remove('hidden');
+
+        // Initial preview render
+        // We use a timeout to ensure modal is visible and layout is calculated
+        setTimeout(() => {
+            const previewElement = document.getElementById('preview-element');
+            if (previewElement) {
+                // Ensure cornerstone is enabled or re-enabled cleanly
+                try {
+                    cornerstone.enable(previewElement);
+                } catch (e) { }
+
+                // Force resize to match container dimensions now that it's visible
+                cornerstone.resize(previewElement, true);
+
+                // Render
+                this.updateDownloadPreview();
+            }
+        }, 50);
+    }
+
+    closeDownloadModal() {
+        const modal = document.getElementById('download-modal');
+        modal.classList.add('hidden');
+
+        // Clean up preview element
+        const previewElement = document.getElementById('preview-element');
+        if (previewElement) {
+            try {
+                cornerstone.disable(previewElement);
+            } catch (e) { }
+        }
+    }
+
+
+    updateDownloadPreview() {
+        const previewElement = document.getElementById('preview-element');
+        if (!this.element || !previewElement) return;
+
+        // Make sure it's enabled (or already enabled)
+        // FORCE CLEANUP: Clear content to ensure fresh Cornerstone initialization
+        // This solves the black screen on reopen issue by ensuring no stale state exists
+        if (previewElement.innerHTML !== '') {
+            try {
+                cornerstone.disable(previewElement);
+            } catch (e) { }
+            previewElement.innerHTML = '';
+        }
+
+        try {
+            cornerstone.enable(previewElement);
+        } catch (e) {
+            // Probably already enabled, which is fine
+        }
+
+        const mainEnabledElement = cornerstone.getEnabledElement(this.element);
+        const image = mainEnabledElement.image;
+
+        // Define render handler to draw overlays AFTER image is ready
+        const onPreviewRendered = (e) => {
+            previewElement.removeEventListener('cornerstoneimagerendered', onPreviewRendered);
+            this.drawDownloadOverlays(previewElement);
+        };
+
+        // Listen for render event
+        previewElement.addEventListener('cornerstoneimagerendered', onPreviewRendered);
+
+        // 1. Display Image fitting the container
+        cornerstone.displayImage(previewElement, image);
+
+        // 2. Fit to window (container) so it looks nice
+        // This calculates the correct scale/translation to fit
+        cornerstone.fitToWindow(previewElement);
+
+        // 3. Sync Window/Level from main view BUT KEEP SCALE/TRANSLATION from fitToWindow
+        const previewViewport = cornerstone.getViewport(previewElement);
+        const mainViewport = mainEnabledElement.viewport;
+
+        previewViewport.voi = { ...mainViewport.voi };
+        previewViewport.invert = mainViewport.invert;
+        previewViewport.collation = mainViewport.collation;
+        // Do NOT copy scale or translation, let fitToWindow rule.
+
+        cornerstone.setViewport(previewElement, previewViewport);
+
+        // 4. Force immediate update triggers render -> triggers event -> draws overlays
+        cornerstone.updateImage(previewElement);
+
+        // 5. Handle Warning Label Visibility (Visual only for preview)
+        // Warning is handled by HTML overlay, safe to toggle immediately
+        const includeWarning = document.getElementById('download-warning').checked;
+        const warningEl = document.getElementById('preview-warning');
+        if (warningEl) {
+            warningEl.style.display = includeWarning ? 'block' : 'none';
+        }
+    }
+
+    drawDownloadOverlays(element) {
+        const includeAnnotations = document.getElementById('download-annotations').checked;
+        // Even if annotations aren't checked, we might need to clear previous drawings
+        // But since we redraw the image every time, canvas is cleared by cornerstone.
+
+        if (!includeAnnotations) return;
+
+        const canvas = element.querySelector('canvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const enabledElement = cornerstone.getEnabledElement(element);
+        const image = enabledElement.image;
+
+        // Setup pixel spacing logic similar to main view
+        const pixelSpacing = {
+            x: image.columnPixelSpacing || 1,
+            y: image.rowPixelSpacing || 1,
+            estimated: (!image.columnPixelSpacing || !image.rowPixelSpacing) // If info is missing
+        };
+
+        const measurementsToDraw = this.measurements.filter(m =>
+            m.imageIndex === this.currentImageIndex &&
+            (!m.seriesId || (this.currentSeries && m.seriesId === this.currentSeries.id))
+        );
+        if (this.currentMeasurement && this.currentMeasurement.imageIndex === this.currentImageIndex) {
+            measurementsToDraw.push(this.currentMeasurement);
+        }
+
+        // Reset transform to ensure pixelToCanvas coordinates (which are in canvas space) map 1:1 to drawing
+        // Reset transform to ensure pixelToCanvas coordinates (which are in canvas space) map 1:1 to drawing
+        // HiDPI Fix: Scale context by device pixel ratio if backing store > client size
+        const dpr = canvas.width / canvas.clientWidth;
+
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        if (dpr !== 1) {
+            ctx.scale(dpr, dpr);
+        }
+        ctx.save();
+
+        measurementsToDraw.forEach(m => {
+            const start = cornerstone.pixelToCanvas(element, m.start);
+            const end = cornerstone.pixelToCanvas(element, m.end);
+
+            // Draw Line
+            ctx.beginPath();
+            ctx.strokeStyle = '#00ff00'; // Lime green
+            ctx.lineWidth = 2; // Scaled? No, fixed width for visibility
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+
+            // Draw Endpoints
+            ctx.fillStyle = '#00ff00';
+            [start, end].forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Calculate distance
+            const dx = m.end.x - m.start.x;
+            const dy = m.end.y - m.start.y;
+            const dxMm = dx * pixelSpacing.x;
+            const dyMm = dy * pixelSpacing.y;
+            const distance = Math.sqrt(dxMm * dxMm + dyMm * dyMm);
+
+            const prefix = pixelSpacing.estimated ? '~' : '';
+            const text = `${prefix}${distance.toFixed(1)} mm`;
+
+            // Draw Text Label
+            const midX = (start.x + end.x) / 2;
+            const midY = (start.y + end.y) / 2;
+
+            ctx.font = '13px Arial';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'center';
+
+            const textWidth = ctx.measureText(text).width + 8;
+
+            // Background
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(midX - textWidth / 2, midY - 12, textWidth, 24);
+
+            // Text
+            ctx.fillStyle = '#00ff00';
+            ctx.fillText(text, midX, midY);
+        });
+
+        ctx.restore();
+    }
+
+    saveImage() {
+        const width = parseInt(document.getElementById('download-width').value) || 1024;
+        const height = parseInt(document.getElementById('download-height').value) || 1024;
+        const filename = document.getElementById('download-filename').value || 'Image';
+        const format = document.getElementById('download-format').value || 'jpg';
+        const includeWarning = document.getElementById('download-warning').checked;
+
+        // 1. Create a temporary off-screen container
+        const tempDiv = document.createElement('div');
+        tempDiv.style.width = width + 'px';
+        tempDiv.style.height = height + 'px';
+
+        // Use visible styling but off-screen to ensure browser renders it properly
+        tempDiv.style.position = 'fixed'; // Fixed escapes any parent overflow
+        tempDiv.style.left = '0';
+        tempDiv.style.top = '0';
+        tempDiv.style.zIndex = '-1000'; // Behind everything
+        tempDiv.style.opacity = '0'; // Invisible but rendered
+        tempDiv.style.pointerEvents = 'none';
+
+        document.body.appendChild(tempDiv);
+
+        try {
+            // 2. Enable Cornerstone
+            cornerstone.enable(tempDiv);
+
+            const mainEnabledElement = cornerstone.getEnabledElement(this.element);
+            const image = mainEnabledElement.image;
+
+            // Define the render handler
+            const onImageRendered = (e) => {
+                tempDiv.removeEventListener('cornerstoneimagerendered', onImageRendered);
+
+                setTimeout(() => {
+                    try {
+                        // 6. Draw Annotations on top of rendered image
+                        this.drawDownloadOverlays(tempDiv);
+
+                        // 7. Get Canvas and Context
+                        const canvas = tempDiv.querySelector('canvas');
+                        const ctx = canvas.getContext('2d');
+
+                        // 8. Burn-in Warning if requested
+                        if (includeWarning) {
+                            ctx.save();
+                            ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+                            ctx.font = 'bold 24px Arial';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'bottom';
+
+                            const wText = "Not For Diagnostic Use";
+                            const wWidth = ctx.measureText(wText).width + 30;
+
+                            // Background strip
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                            ctx.fillRect((canvas.width / 2) - (wWidth / 2), canvas.height - 40, wWidth, 34);
+
+                            ctx.fillStyle = '#ff4444';
+                            ctx.fillText(wText, canvas.width / 2, canvas.height - 12);
+                            ctx.restore();
+                        }
+
+                        // 9. Download
+                        const mimeType = format === 'png' ? 'image/png' : 'image/jpeg';
+                        const dataUrl = canvas.toDataURL(mimeType, 0.95);
+
+                        const link = document.createElement('a');
+                        link.download = `${filename}.${format}`;
+                        link.href = dataUrl;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+
+                        this.closeDownloadModal();
+
+                    } catch (err) {
+                        console.error('Error during download processing:', err);
+                        alert('Error procesando la imagen descargada.');
+                    } finally {
+                        try { cornerstone.disable(tempDiv); } catch (e) { }
+                        if (tempDiv.parentNode) document.body.removeChild(tempDiv);
+                    }
+                }, 50);
+            };
+
+            // 3. Listen for render completion
+            tempDiv.addEventListener('cornerstoneimagerendered', onImageRendered);
+
+            // 4. Display logic
+            cornerstone.displayImage(tempDiv, image);
+
+            // 5. Set Viewport and Fit
+            // Important: We update viewport AFTER displayImage triggers the initial setup
+            // But we need to ensure updateImage is called after these changes.
+            const vp = cornerstone.getViewport(tempDiv);
+            vp.voi = { ...mainEnabledElement.viewport.voi };
+            vp.invert = mainEnabledElement.viewport.invert;
+            cornerstone.setViewport(tempDiv, vp);
+
+            cornerstone.fitToWindow(tempDiv);
+
+            // Force Update to trigger render and event
+            cornerstone.updateImage(tempDiv);
+
+        } catch (e) {
+            console.error('Error initiating download:', e);
+            document.body.removeChild(tempDiv);
+        }
     }
 
     openAboutModal() {
@@ -754,7 +1078,8 @@ class DicomViewer {
                     this.currentMeasurement = {
                         start: imagePoint,
                         end: imagePoint,
-                        imageIndex: this.currentImageIndex
+                        imageIndex: this.currentImageIndex,
+                        seriesId: this.currentSeries ? this.currentSeries.id : null
                     };
                 }
                 return;
@@ -889,7 +1214,11 @@ class DicomViewer {
         const pixelSpacing = this.getPixelSpacing();
 
         // Draw all measurements for current image
-        const measurementsToDraw = this.measurements.filter(m => m.imageIndex === this.currentImageIndex);
+        // Draw all measurements for current image AND current series
+        const measurementsToDraw = this.measurements.filter(m =>
+            m.imageIndex === this.currentImageIndex &&
+            (!m.seriesId || (this.currentSeries && m.seriesId === this.currentSeries.id))
+        );
 
         // Add current measurement being drawn
         if (this.currentMeasurement && this.currentMeasurement.imageIndex === this.currentImageIndex) {
@@ -1054,7 +1383,11 @@ class DicomViewer {
     }
 
     clearMeasurements() {
-        this.measurements = this.measurements.filter(m => m.imageIndex !== this.currentImageIndex);
+        // Only clear measurements for current image of current series
+        this.measurements = this.measurements.filter(m =>
+            !(m.imageIndex === this.currentImageIndex &&
+                (!m.seriesId || (this.currentSeries && m.seriesId === this.currentSeries.id)))
+        );
         this.drawMeasurements();
     }
 
