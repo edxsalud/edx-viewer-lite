@@ -15,18 +15,18 @@
 
 | Versión | Fecha | Notas |
 |---------|-------|-------|
-| **1.0.0** | Enero 2026 | Versión inicial con carga de archivos, herramientas de visualización (Pan, Zoom, W/L, Medir) y soporte para Structured Reports |
+| **1.0.0** | Enero 2026 | Versión inicial con arquitectura modular, herramientas de visualización y descarga de imágenes |
 
 ## 🌐 Navegadores Compatibles
 
 | Navegador | Versión Mínima | Estado |
 |-----------|----------------|--------|
-| ![Chrome](https://img.shields.io/badge/Chrome-80+-4285F4?logo=googlechrome&logoColor=white) | 80+ | ✅ Recomendado |
-| ![Firefox](https://img.shields.io/badge/Firefox-75+-FF7139?logo=firefox&logoColor=white) | 75+ | ✅ Compatible |
-| ![Safari](https://img.shields.io/badge/Safari-13+-000000?logo=safari&logoColor=white) | 13+ | ✅ Compatible |
-| ![Edge](https://img.shields.io/badge/Edge-80+-0078D7?logo=microsoftedge&logoColor=white) | 80+ | ✅ Compatible |
+| ![Chrome](https://img.shields.io/badge/Chrome-86+-4285F4?logo=googlechrome&logoColor=white) | 86+ | ✅ Recomendado |
+| ![Firefox](https://img.shields.io/badge/Firefox-75+-FF7139?logo=firefox&logoColor=white) | 75+ | ⚠️ Sin File System API |
+| ![Safari](https://img.shields.io/badge/Safari-13+-000000?logo=safari&logoColor=white) | 13+ | ⚠️ Sin File System API |
+| ![Edge](https://img.shields.io/badge/Edge-86+-0078D7?logo=microsoftedge&logoColor=white) | 86+ | ✅ Compatible |
 
-> **Nota:** Se recomienda usar **Google Chrome** para la mejor experiencia de usuario. El visor requiere un navegador moderno con soporte para ES6+, Web Workers y la API File System Access.
+> **Nota:** Se recomienda usar **Google Chrome 86+** para la mejor experiencia. La descarga de imágenes usa File System Access API (solo Chrome/Edge).
 
 ## 🚀 Características
 
@@ -38,16 +38,12 @@
   - Zoom
   - Window/Level (Brillo/Contraste)
   - **Medir** (Regla para medir distancias en mm)
-  - **Stack Scroll**: Navegación optimizada para mouse y trackpad con sensibilidad ajustada para evitar saltos.
+  - **Stack Scroll**: Navegación optimizada para mouse y trackpad
   - Reset
-- **🔀 Navegación Avanzada**:
-  - Rueda del ratón / Trackpad (controlado y sin saltos)
-  - **Barra de Scroll Lateral**: Indicador visual y control de arrastre en el lado derecho
-  - Botones Anterior/Siguiente
+- **💾 Descarga de imágenes**: Guardar imágenes como JPG/PNG con anotaciones
+- **🔀 Navegación Avanzada**: Rueda del ratón, barra de scroll lateral, botones
 - **📋 Metadatos**: Panel derecho con información del paciente, estudio e imagen
 - **📄 Reportes SR**: Visualización de Structured Reports como texto
-- **ℹ️ Información del Sistema**: Modal "Acerca de" con detección automática de versión de navegador y SO
-- **📖 Instrucciones**: Panel central con guía de uso paso a paso
 
 ## 🛠️ Tecnologías Utilizadas
 
@@ -66,25 +62,32 @@
 EDX Viewer/
 ├── visor.html                  # Página principal
 ├── app/
-│   ├── js/app.js               # Lógica de la aplicación
+│   ├── js/
+│   │   ├── app.js              # Orquestador principal
+│   │   └── modules/            # Módulos IIFE
+│   │       ├── DicomLoader.js  # Carga de archivos DICOM
+│   │       ├── ViewportManager.js # Control del viewport
+│   │       ├── MeasurementTool.js # Herramienta de medición
+│   │       ├── ImageExporter.js   # Descarga de imágenes
+│   │       └── UIController.js    # Eventos e interfaz
 │   ├── css/styles.css          # Estilos CSS
-│   └── images/logo-edx-white.png # Logo de la empresa
-├── README.md                   # Este archivo
-├── LICENSE                     # Licencia GPL-3.0
-└── DICOM/                      # Carpeta de ejemplo con archivos DICOM
+│   └── images/                 # Assets
+├── README.md
+└── LICENSE                     # Licencia GPL-3.0
 ```
 
 ## 🚦 Cómo Usar
 
-1. **Abrir** `visor.html` directamente en Chrome, Firefox o Safari
-2. **Hacer clic** en el botón "Cargar Carpeta DICOM"
+1. **Abrir** `visor.html` directamente en Chrome
+2. **Hacer clic** en "Cargar Carpeta DICOM"
 3. **Seleccionar** una carpeta con archivos `.dcm`
-4. **Hacer clic** en una serie del panel izquierdo para visualizar las imágenes
+4. **Usar las herramientas** para visualizar y medir
+5. **Guardar imágenes** con el botón "Guardar" (diálogo nativo)
 
 ## ⚠️ Limitaciones Conocidas
 
-- El **drag-and-drop** de carpetas no funciona con el protocolo `file://` debido a restricciones de seguridad del navegador
-- Se debe usar el botón **"Cargar Carpeta DICOM"** para cargar estudios
+- La **descarga de imágenes** usa File System Access API, por lo que no aparece en el historial de descargas del navegador
+- Navegadores sin File System API (Firefox, Safari) no pueden descargar imágenes
 
 ## 🤝 Contribuir
 
